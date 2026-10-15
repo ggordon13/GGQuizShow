@@ -1,6 +1,6 @@
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ANSWER_STYLES } from '../lib/constants.js';
 import { useConnected } from '../lib/socket.js';
 import { useToasts } from '../lib/toast.js';
@@ -17,6 +17,37 @@ export function Shape({ shape, size = 32 }) {
 }
 
 export const answerStyle = (index) => ANSWER_STYLES[index % ANSWER_STYLES.length];
+
+/** A question's reference image. With `zoomable`, tapping opens it full screen (for phones). */
+export function QuestionImage({ src, className = '', zoomable = false }) {
+  const [zoomed, setZoomed] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!zoomed) return undefined;
+    const onKey = (e) => e.key === 'Escape' && setZoomed(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomed]);
+
+  if (!src || failed) return null;
+  const img = (
+    <img src={src} alt="Question reference" className={`question-image ${className}`} onError={() => setFailed(true)} />
+  );
+  if (!zoomable) return img;
+  return (
+    <>
+      <button type="button" className="image-zoom-button" onClick={() => setZoomed(true)} aria-label="Enlarge image">
+        {img}
+      </button>
+      {zoomed && (
+        <div className="image-lightbox" role="dialog" aria-label="Question image" onClick={() => setZoomed(false)}>
+          <img src={src} alt="Question reference, enlarged" />
+          <span className="image-lightbox-hint">Tap anywhere to close</span>
+        </div>
+      )}
+    </>
+  );
+}
 
 /** "GG Quiz Show" with letters that drop in. */
 export function Logo({ size = 'lg' }) {

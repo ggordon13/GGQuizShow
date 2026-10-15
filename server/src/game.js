@@ -302,6 +302,8 @@ export class Game {
     return {
       index: this.questionIndex,
       text: q.text,
+      // Served over HTTP rather than inside every state message; ?v= busts caches if it changes.
+      image: q.image ? `/api/media/${this.pin}/${this.questionIndex}?v=${q.image.hash}` : null,
       timeLimit: q.timeLimit,
       points: q.points,
       answers: q.answers.map((a) => (revealCorrect ? { text: a.text, correct: a.correct } : { text: a.text })),
@@ -318,6 +320,12 @@ export class Game {
       prevRank: p.prevRank,
       streak: p.streak,
     }));
+  }
+
+  /** A question's image, but only once that question has been shown, so nobody can peek ahead. */
+  imageFor(index) {
+    if (!Number.isInteger(index) || index < 0 || index > this.questionIndex) return null;
+    return this.quiz.questions[index]?.image ?? null;
   }
 
   get showsQuestion() {

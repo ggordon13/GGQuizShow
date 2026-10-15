@@ -27,12 +27,26 @@ const io = new Server(httpServer, {
   // Phones lock screens and switch networks; be patient before declaring them gone.
   pingInterval: 10_000,
   pingTimeout: 20_000,
+  // Quizzes with images are uploaded in one message when a game is created.
+  maxHttpBufferSize: 32e6,
   cors: process.env.CORS_ORIGIN ? { origin: process.env.CORS_ORIGIN.split(',') } : undefined,
 });
 
-createGameServer(io, { maxPlayers: MAX_PLAYERS, resultsDir: RESULTS_DIR });
+const { games } = createGameServer(io, { maxPlayers: MAX_PLAYERS, resultsDir: RESULTS_DIR });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// Question images, served from memory while their game is running.
+app.get('/api/media/:pin/:index', (req, res) => {
+  const image = games.get(req.params.pin)?.imageFor(Number(req.params.index));
+  if (!image) return res.sendStatus(404);
+  res.set({
+    'Content-Type': image.mime,
+    'Cache-Control': 'public, max-age=86400, immutable',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.send(image.data);
+});
 app.get('/api/info', (_req, res) => res.json({ maxPlayers: MAX_PLAYERS, lanAddresses: lanAddresses() }));
 
 // In production the server also serves the built React app.

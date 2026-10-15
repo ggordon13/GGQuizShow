@@ -1,5 +1,6 @@
 import { LIMITS } from './constants.js';
 import { downloadFile, loadJSON, saveJSON } from './hooks.js';
+import { getImage, putImage } from './imageStore.js';
 import { SAMPLE_QUIZZES } from './sampleQuizzes.js';
 
 const KEY = 'ggquiz.quizzes';
@@ -13,6 +14,7 @@ export function blankQuestion() {
     text: '',
     timeLimit: 20,
     points: 1,
+    imageId: null, // key into imageStore
     answers: [0, 1, 2, 3].map(() => ({ text: '', correct: false })),
   };
 }
@@ -34,6 +36,7 @@ export function normalizeQuiz(raw) {
       text: String(q?.text ?? ''),
       timeLimit: Number(q?.timeLimit) || 20,
       points: [0, 1, 2].includes(q?.points) ? q.points : 1,
+      imageId: typeof q?.imageId === 'string' ? q.imageId : null,
       answers,
     };
   });
@@ -73,21 +76,47 @@ export function validateQuiz(quiz) {
   return issues;
 }
 
-/** The payload the server expects: empty answers removed. */
-export function toServerQuiz(quiz) {
-  return {
-    title: quiz.title.trim() || 'Untitled quiz',
-    questions: quiz.questions.map((q) => ({
-      text: q.text,
-      timeLimit: q.timeLimit,
-      points: q.points,
-      answers: q.answers.filter((a) => a.text.trim()),
-    })),
-  };
+/**
+ * The payload the server expects: empty answers removed, images inlined as
+ * data URLs. `missingImages` lists question numbers whose image was lost.
+ */
+export async function toServerQuiz(quiz) {
+  const missingImages = [];
+  const questions = await Promise.all(
+    quiz.questions.map(async (q, i) => {
+      const image = await getImage(q.imageId);
+      if (q.imageId && !image) missingImages.push(i + 1);
+      return {
+        text: q.text,
+        timeLimit: q.timeLimit,
+        points: q.points,
+        image,
+        answers: q.answers.filter((a) => a.text.trim()),
+      };
+    }),
+  );
+  return { quiz: { title: quiz.title.trim() || 'Untitled quiz', questions }, missingImages };
 }
 
-export function exportQuiz(quiz) {
-  const data = { title: quiz.title, questions: toServerQuiz(quiz).questions };
+/** Downloads a quiz as JSON, images included, so it can be imported on another computer. */
+export async function exportQuiz(quiz) {
+  const { quiz: data } = await toServerQuiz(quiz);
   const filename = `${(quiz.title || 'quiz').replace(/[^\w-]+/g, '-').toLowerCase()}.json`;
   downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');
+}
+
+/** Turns exported JSON back into a library quiz, moving embedded images into the image store. */
+export async function importQuiz(raw) {
+  const quiz = normalizeQuiz({ ...raw, id: newId(), updatedAt: Date.now() });
+  await Promise.all(
+    quiz.questions.map(async (q, i) => {
+      const image = raw?.questions?.[i]?.image;
+      q.imageId = null;
+      if (typeof image === 'string' && image.startsWith('data:image/')) {
+        q.imageId = newId();
+        await putImage(q.imageId, image);
+      }
+    }),
+  );
+  return quiz;
 }

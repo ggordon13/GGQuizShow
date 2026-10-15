@@ -1,10 +1,116 @@
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { answerStyle, Shape } from '../components/ui.jsx';
 import { LIMITS, POINT_OPTIONS, TIME_LIMITS } from '../lib/constants.js';
+import { compressImage, imageFromTransfer } from '../lib/image.js';
+import { getImage, putImage } from '../lib/imageStore.js';
 import { blankQuestion, newId, validateQuiz } from '../lib/quizStore.js';
 import { toast } from '../lib/toast.js';
+
+/** Add, replace or remove a question's image: click to browse, drag and drop, or paste. */
+function ImagePicker({ imageId, onChange }) {
+  const inputRef = useRef(null);
+  const [src, setSrc] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setSrc(null);
+    getImage(imageId).then((data) => alive && setSrc(data));
+    return () => {
+      alive = false;
+    };
+  }, [imageId]);
+
+  async function addFile(file) {
+    if (!file || busy) return;
+    setBusy(true);
+    try {
+      const dataUrl = await compressImage(file);
+      const id = newId();
+      await putImage(id, dataUrl);
+      onChange(id);
+    } catch (err) {
+      toast(err?.message || "Couldn't add that image");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Pasting a screenshot anywhere in the editor adds it to the current question.
+  useEffect(() => {
+    const onPaste = (e) => {
+      const file = imageFromTransfer(e.clipboardData);
+      if (!file) return;
+      e.preventDefault();
+      addFile(file);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  });
+
+  const dropProps = {
+    onDragOver: (e) => {
+      e.preventDefault();
+      setDragging(true);
+    },
+    onDragLeave: () => setDragging(false),
+    onDrop: (e) => {
+      e.preventDefault();
+      setDragging(false);
+      addFile(imageFromTransfer(e.dataTransfer));
+    },
+  };
+
+  const input = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept="image/jpeg,image/png,image/webp,image/gif"
+      hidden
+      onChange={(e) => {
+        addFile(e.target.files?.[0]);
+        e.target.value = '';
+      }}
+    />
+  );
+
+  if (imageId) {
+    return (
+      <div className={`image-picker has-image ${dragging ? 'dragging' : ''}`} {...dropProps}>
+        {src ? <img src={src} alt="Question" className="image-preview" /> : <div className="image-missing">Image not found</div>}
+        <div className="image-actions">
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => inputRef.current.click()} disabled={busy}>
+            {busy ? 'Processing…' : 'Replace'}
+          </button>
+          <button type="button" className="btn btn-danger btn-small" onClick={() => onChange(null)} disabled={busy}>
+            Remove
+          </button>
+        </div>
+        {input}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={`image-picker image-drop ${dragging ? 'dragging' : ''}`}
+      onClick={() => inputRef.current.click()}
+      disabled={busy}
+      {...dropProps}
+    >
+      <span className="image-drop-icon" aria-hidden="true">
+        🖼️
+      </span>
+      <strong>{busy ? 'Processing image…' : 'Add an image'}</strong>
+      <span className="muted small">Click to browse, drag a file here, or paste a screenshot</span>
+      {input}
+    </button>
+  );
+}
 
 export default function QuizEditor({ quiz, onSave, onBack, onHost }) {
   const root = useRef(null);
@@ -138,6 +244,11 @@ export default function QuizEditor({ quiz, onSave, onBack, onHost }) {
                 >
                   <span className="question-num">{i + 1}</span>
                   <span className="question-preview">{q.text || <em>Untitled question</em>}</span>
+                  {q.imageId && (
+                    <span className="question-has-image" title="Has an image" aria-label="Has an image">
+                      🖼️
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -158,6 +269,8 @@ export default function QuizEditor({ quiz, onSave, onBack, onHost }) {
               value={question.text}
               onChange={(e) => updateQuestion({ text: e.target.value })}
             />
+
+            <ImagePicker imageId={question.imageId} onChange={(imageId) => updateQuestion({ imageId })} />
 
             <div className="row gap wrap">
               <label className="field">

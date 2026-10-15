@@ -1,7 +1,7 @@
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { useEffect, useRef, useState } from 'react';
-import { answerStyle, CountUp, Logo, Shape, TimerRing } from '../components/ui.jsx';
+import { answerStyle, CountUp, Logo, QuestionImage, Shape, TimerRing } from '../components/ui.jsx';
 import { LIMITS } from '../lib/constants.js';
 import { ordinal, useCountdown } from '../lib/hooks.js';
 import { request } from '../lib/socket.js';
@@ -146,6 +146,11 @@ export function PlayerIntro({ state }) {
         Question {state.questionIndex + 1} of {state.totalQuestions}
       </p>
       <h2 className="question-text rise">{state.question.text}</h2>
+      {state.question.image && (
+        <div className="rise">
+          <QuestionImage src={state.question.image} className="player-intro-image" />
+        </div>
+      )}
       {state.question.points === 2 && <p className="badge badge-gold pop">Double points!</p>}
       {state.question.points === 0 && <p className="badge pop">Practice: no points</p>}
       <div className="progress rise">
@@ -177,7 +182,12 @@ export function AnswerPad({ state, onAnswer }) {
         <p className="answer-question">{state.question.text}</p>
         <TimerRing seconds={seconds} fraction={fraction} size={56} />
       </div>
-      <div className={`answer-grid count-${answers.length}`}>
+      {state.question.image && (
+        <div className="answer-image">
+          <QuestionImage src={state.question.image} zoomable />
+        </div>
+      )}
+      <div className={`answer-grid count-${answers.length} ${state.question.image ? 'compact' : ''}`}>
         {answers.map((a, i) => {
           const s = answerStyle(i);
           return (

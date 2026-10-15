@@ -1,4 +1,10 @@
+import { createHash } from 'node:crypto';
 import { GameError } from './errors.js';
+
+/** The client compresses images to well under these; the limits stop abuse. */
+export const IMAGE_LIMITS = Object.freeze({ maxBytes: 1_500_000, maxTotalBytes: 25_000_000 });
+// SVG is deliberately excluded: it can carry scripts.
+const IMAGE_DATA_URL = /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/;
 
 export const QUIZ_LIMITS = Object.freeze({
   title: 120,
@@ -28,8 +34,12 @@ export function sanitizeQuiz(input) {
     throw bad(`A quiz can have at most ${QUIZ_LIMITS.questions} questions`);
   }
 
+  let imageBytes = 0;
   const questions = input.questions.map((q, i) => {
     const label = `Question ${i + 1}`;
+    const image = parseImage(q?.image, label);
+    imageBytes += image?.data.length ?? 0;
+    if (imageBytes > IMAGE_LIMITS.maxTotalBytes) throw bad('The images in this quiz are too large in total (max 25 MB)');
     const text = cleanText(q?.text, QUIZ_LIMITS.questionText);
     if (!text) throw bad(`${label} needs question text`);
 
@@ -46,8 +56,20 @@ export function sanitizeQuiz(input) {
       : 20;
     const points = POINT_MULTIPLIERS.includes(q.points) ? q.points : 1;
 
-    return { text, answers, timeLimit, points };
+    return { text, answers, timeLimit, points, image };
   });
 
   return { title: cleanText(input.title, QUIZ_LIMITS.title) || 'Untitled quiz', questions };
+}
+
+/** Decodes an optional image data URL into { mime, data, hash }, or null for no image. */
+function parseImage(value, label) {
+  if (value == null || value === '') return null;
+  const match = typeof value === 'string' ? IMAGE_DATA_URL.exec(value) : null;
+  if (!match) throw new GameError('BAD_QUIZ', `${label} has an unsupported image. Use JPEG, PNG, WebP or GIF.`);
+  const data = Buffer.from(match[2], 'base64');
+  if (data.length > IMAGE_LIMITS.maxBytes) {
+    throw new GameError('BAD_QUIZ', `${label}'s image is too large (max 1.5 MB)`);
+  }
+  return { mime: match[1], data, hash: createHash('sha1').update(data).digest('hex').slice(0, 12) };
 }

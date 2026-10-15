@@ -1,8 +1,9 @@
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Logo } from '../components/ui.jsx';
-import { blankQuiz, exportQuiz, newId, normalizeQuiz } from '../lib/quizStore.js';
+import { pruneImages } from '../lib/imageStore.js';
+import { blankQuiz, exportQuiz, importQuiz, newId } from '../lib/quizStore.js';
 import { toast } from '../lib/toast.js';
 
 export default function QuizLibrary({ quizzes, onHome, onCreate, onEdit, onHost, onUpdate }) {
@@ -16,16 +17,28 @@ export default function QuizLibrary({ quizzes, onHome, onCreate, onEdit, onHost,
     { scope: root },
   );
 
+  // Free up images that no saved quiz uses any more (replaced, or from deleted quizzes).
+  useEffect(() => {
+    pruneImages(quizzes.flatMap((q) => q.questions.map((x) => x.imageId)).filter(Boolean));
+  }, [quizzes]);
+
   async function importFile(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    let raw;
     try {
-      const quiz = normalizeQuiz({ ...JSON.parse(await file.text()), id: newId(), updatedAt: Date.now() });
+      raw = JSON.parse(await file.text());
+    } catch {
+      toast("That file isn't a valid quiz JSON file");
+      return;
+    }
+    try {
+      const quiz = await importQuiz(raw);
       onCreate(quiz);
       toast(`Imported "${quiz.title || 'Untitled quiz'}"`, 'success');
     } catch {
-      toast("That file isn't a valid quiz JSON file");
+      toast("Couldn't save that quiz's images. Your browser storage may be full.");
     }
   }
 

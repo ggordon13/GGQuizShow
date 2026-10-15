@@ -89,6 +89,15 @@ Quizzes are built in the browser editor and saved to the host's `localStorage`. 
 
 Each question has 2–4 answers, at least one marked correct, and a 5–240 second time limit.
 
+### Question images
+
+Each question can have a reference image. In the editor, click the image area to browse, drag a file onto it, or paste a screenshot (Ctrl+V). Images are resized to at most 1280px and compressed to WebP (JPEG on browsers without WebP encoding), usually 50–400 KB. Animated GIFs become still images.
+
+- Images are stored in the host browser's IndexedDB; the quiz in `localStorage` refers to them by id. Exported JSON includes images as `"image": "data:image/webp;base64,..."`, so importing on another computer brings them along.
+- When a game is created, images are uploaded with the quiz and kept in server memory. Phones load each one from `/api/media/<pin>/<question>` when that question starts. Images for upcoming questions return 404, so players can't peek ahead.
+- The image appears on the host screen and on phones during the intro and while answering. Players can tap it to view it full screen.
+- Limits: 1.5 MB per image and 25 MB per quiz on the server (the editor's compression keeps you far below these). JPEG, PNG, WebP and GIF are accepted; SVG isn't, because it can contain scripts.
+
 ## Testing
 
 ```bash

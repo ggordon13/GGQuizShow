@@ -2,7 +2,7 @@ import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { QRCodeSVG } from 'qrcode.react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { answerStyle, CountUp, Shape, TimerRing } from '../components/ui.jsx';
+import { answerStyle, CountUp, QuestionImage, Shape, TimerRing } from '../components/ui.jsx';
 import { useCountdown } from '../lib/hooks.js';
 import Confetti3D from '../three/Confetti3D.jsx';
 
@@ -166,6 +166,9 @@ function HostIntro({ game, onNext }) {
     () => {
       const tl = gsap.timeline();
       tl.from('.question-banner', { scale: 0.6, opacity: 0, duration: 0.7, ease: 'back.out(1.7)' });
+      if (root.current.querySelector('.question-image')) {
+        tl.from('.question-image', { y: 40, opacity: 0, scale: 0.92, duration: 0.6, ease: 'power3.out' }, '-=0.3');
+      }
       if (game.timing) {
         gsap.fromTo(
           '.progress-fill',
@@ -179,6 +182,7 @@ function HostIntro({ game, onNext }) {
   return (
     <section ref={root} className="host-intro">
       <QuestionHeading game={game} />
+      <QuestionImage src={game.question.image} className="host-intro-image" />
       <div className="progress wide">
         <div className="progress-fill" />
       </div>
@@ -229,17 +233,24 @@ function HostQuestion({ game, onNext }) {
   return (
     <section ref={root} className="host-question">
       <QuestionHeading game={game} className="compact" />
-      <div className="question-middle">
+      <div className={`question-middle ${game.question.image ? 'with-image' : ''}`}>
         <TimerRing seconds={seconds} fraction={fraction} size={150} />
-        <div className="answer-counter">
-          <span ref={countRef} className="answer-count">
-            {game.answeredCount}
-          </span>
-          <span className="muted">of {game.playerCount} answered</span>
+        {game.question.image && (
+          <div className="host-question-image">
+            <QuestionImage src={game.question.image} />
+          </div>
+        )}
+        <div className="answer-side">
+          <div className="answer-counter">
+            <span ref={countRef} className="answer-count">
+              {game.answeredCount}
+            </span>
+            <span className="muted">of {game.playerCount} answered</span>
+          </div>
+          <button type="button" className="btn btn-ghost" onClick={onNext}>
+            Skip
+          </button>
         </div>
-        <button type="button" className="btn btn-ghost" onClick={onNext}>
-          Skip
-        </button>
       </div>
       <AnswerTiles answers={game.question.answers} />
     </section>

@@ -67,7 +67,10 @@ export default function HostApp({ onExit, setEnergy }) {
       return;
     }
     setCreating(true);
-    const res = await request('host:create', { quiz: toServerQuiz(quiz) });
+    const { quiz: payload, missingImages } = await toServerQuiz(quiz);
+    if (missingImages.length) toast(`Image missing for question ${missingImages.join(', ')}; hosting without it`, 'info');
+    // Images make this upload bigger, so allow longer than the usual timeout.
+    const res = await request('host:create', { quiz: payload }, 60_000);
     setCreating(false);
     if (!res.ok) {
       toast(res.error);

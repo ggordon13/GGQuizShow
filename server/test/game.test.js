@@ -168,6 +168,36 @@ test('players never see correct answers before the reveal', () => {
   assert.ok(game.hostView().question.answers.every((ans) => !('correct' in ans)));
 });
 
+// 1x1 transparent PNG
+const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+test('question images are validated and only served once their question starts', () => {
+  const withImages = sanitizeQuiz({
+    questions: [
+      { text: 'One', image: PNG, answers: [{ text: 'a', correct: true }, { text: 'b' }] },
+      { text: 'Two', image: PNG, answers: [{ text: 'a', correct: true }, { text: 'b' }] },
+    ],
+  });
+  assert.equal(withImages.questions[0].image.mime, 'image/png');
+  const game = new Game({ pin: '111111', quiz: withImages });
+  games.push(game);
+  const a = game.addPlayer('A');
+  assert.equal(game.imageFor(0), null, 'not before the game starts');
+  game.start();
+  assert.ok(game.imageFor(0));
+  assert.equal(game.imageFor(1), null, 'no peeking at the next question');
+  assert.match(game.playerView(a.id).question.image, /^\/api\/media\/111111\/0\?v=[0-9a-f]{12}$/);
+});
+
+test('unsafe or oversized images are rejected', () => {
+  const q = (image) => ({ questions: [{ text: 'x', image, answers: [{ text: 'a', correct: true }, { text: 'b' }] }] });
+  assert.throws(() => sanitizeQuiz(q('data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=')), /unsupported image/);
+  assert.throws(() => sanitizeQuiz(q('https://example.com/cat.png')), /unsupported image/);
+  const huge = `data:image/jpeg;base64,${Buffer.alloc(1_600_000).toString('base64')}`;
+  assert.throws(() => sanitizeQuiz(q(huge)), /too large/);
+  assert.equal(sanitizeQuiz(q(null)).questions[0].image, null);
+});
+
 test('quiz validation rejects broken quizzes', () => {
   assert.throws(() => sanitizeQuiz({ questions: [] }), { code: 'BAD_QUIZ' });
   assert.throws(
