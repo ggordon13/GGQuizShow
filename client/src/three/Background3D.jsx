@@ -1,14 +1,137 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { ANSWER_STYLES } from '../lib/constants.js';
 import { prefersReducedMotion } from '../lib/hooks.js';
 
-const rand = (min, max) => min + Math.random() * (max - min);
+const BEAM_COLORS = ['#ff4d6d', '#ffb627', '#4d7cff', '#c084fc', '#2ec27e'];
+
+const VERTEX_UV = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+/** Soft round dot used for marquee bulbs and sparkles. */
+function glowTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.22, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.55, 'rgba(255,255,255,0.18)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/** Rotating rays behind the stage, like a classic TV game-show backdrop. */
+function makeSunburst() {
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      uAngle: { value: 0 },
+      uInner: { value: new THREE.Color('#7c3aed') },
+      uOuter: { value: new THREE.Color('#1a0b3d') },
+    },
+    vertexShader: VERTEX_UV,
+    fragmentShader: /* glsl */ `
+      uniform float uAngle;
+      uniform vec3 uInner;
+      uniform vec3 uOuter;
+      varying vec2 vUv;
+      void main() {
+        vec2 p = vUv - 0.5;
+        float r = length(p);
+        float rays = smoothstep(-0.25, 0.25, sin(atan(p.y, p.x) * 14.0 + uAngle));
+        float fade = smoothstep(0.5, 0.03, r);
+        gl_FragColor = vec4(mix(uOuter, uInner, fade), fade * (0.1 + 0.2 * rays));
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), material);
+  mesh.position.set(0, 3, -30);
+  return mesh;
+}
+
+/** A glowing grid floor with a pulse rippling out from centre stage. */
+function makeFloor() {
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color('#a855f7') } },
+    vertexShader: VERTEX_UV,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform vec3 uColor;
+      varying vec2 vUv;
+      void main() {
+        vec2 g = vUv * 48.0;
+        vec2 grid = abs(fract(g - 0.5) - 0.5) / fwidth(g);
+        float line = 1.0 - min(min(grid.x, grid.y), 1.0);
+        float dist = length(vUv - vec2(0.5, 0.7));
+        float fade = smoothstep(0.42, 0.04, dist);
+        float pulse = 0.65 + 0.35 * sin(uTime * 2.5 - dist * 40.0);
+        gl_FragColor = vec4(uColor, line * fade * 0.5 * pulse);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(0, -7, -4);
+  return mesh;
+}
+
+/** A spotlight cone with its apex at the origin, pointing down. Fades along its length and at its edges. */
+function makeBeam(color) {
+  const geometry = new THREE.ConeGeometry(1, 1, 40, 1, true);
+  geometry.translate(0, -0.5, 0);
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    uniforms: { uColor: { value: new THREE.Color(color) }, uIntensity: { value: 0.4 } },
+    vertexShader: /* glsl */ `
+      varying float vAlong;
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        vAlong = 1.0 + position.y; // 1 at the lamp, 0 at the far end
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNormal = normalize(normalMatrix * normal);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uIntensity;
+      varying float vAlong;
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        float edge = abs(dot(normalize(vNormal), normalize(vView)));
+        float a = pow(clamp(vAlong, 0.0, 1.0), 1.4) * pow(edge, 1.6) * uIntensity;
+        gl_FragColor = vec4(uColor, a);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  return new THREE.Mesh(geometry, material);
+}
 
 /**
- * Full-screen three.js scene: the four answer shapes (cone, octahedron, torus,
- * cube) drifting upward through a starfield. `energy` (0..1) speeds everything
- * up. Higher energy suits a live question; lower suits the lobby.
+ * Full-screen three.js game-show stage: sunburst backdrop, sweeping
+ * spotlights, a marquee arch of chasing bulbs, a glowing floor and sparkles.
+ * `energy` (0..1) speeds everything up: high for a live question, low for the lobby.
  */
 export default function Background3D({ energy = 0.3 }) {
   const mountRef = useRef(null);
@@ -31,55 +154,100 @@ export default function Background3D({ energy = 0.3 }) {
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x1a0b3d, 14, 40);
-    const camera = new THREE.PerspectiveCamera(55, mount.clientWidth / mount.clientHeight, 0.1, 100);
-    camera.position.z = 16;
+    const camera = new THREE.PerspectiveCamera(50, mount.clientWidth / mount.clientHeight, 0.1, 120);
+    const cameraHome = new THREE.Vector3(0, 2, 18);
+    camera.position.copy(cameraHome);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
-    key.position.set(6, 10, 10);
-    scene.add(key);
-    const glow = new THREE.PointLight(0xb57bff, 120, 60);
-    glow.position.set(-10, -6, 6);
-    scene.add(glow);
+    const disposables = [];
+    const track = (obj) => {
+      disposables.push(obj.geometry, obj.material);
+      scene.add(obj);
+      return obj;
+    };
 
-    const geometries = [
-      new THREE.ConeGeometry(0.9, 1.4, 3),
-      new THREE.OctahedronGeometry(0.95),
-      new THREE.TorusGeometry(0.62, 0.26, 14, 36),
-      new THREE.BoxGeometry(1.1, 1.1, 1.1),
-    ];
-    const materials = ANSWER_STYLES.map(
-      (s) => new THREE.MeshStandardMaterial({ color: s.color, roughness: 0.4, metalness: 0.1, flatShading: true }),
+    const sunburst = track(makeSunburst());
+    const floor = track(makeFloor());
+
+    // Stage rings on the floor.
+    // Kept far back and faint so they sit behind the UI rather than through it.
+    const rings = [
+      { radius: 6, color: '#ffb627' },
+      { radius: 8, color: '#ff4d6d' },
+    ].map(({ radius, color }) => {
+      const ring = track(
+        new THREE.Mesh(
+          new THREE.TorusGeometry(radius, 0.08, 8, 96),
+          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending }),
+        ),
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(0, -6.95, -20);
+      return ring;
+    });
+
+    // Spotlights hanging above the top edge of the screen.
+    const beamXs = small ? [-9, 0, 9] : [-16, -8, 0, 8, 16];
+    const beams = beamXs.map((x, i) => {
+      const beam = track(makeBeam(BEAM_COLORS[i % BEAM_COLORS.length]));
+      beam.position.set(x, 14, -8);
+      beam.scale.set(3.6, 30, 3.6);
+      beam.rotation.x = 0.12;
+      beam.userData = { base: -x * 0.025, phase: i * 1.7, speed: 0.8 + (i % 3) * 0.25 };
+      return beam;
+    });
+
+    const glow = glowTexture();
+    disposables.push(glow);
+
+    // Marquee arch of light bulbs with a chasing pattern.
+    const bulbCount = small ? 36 : 64;
+    const bulbPositions = new Float32Array(bulbCount * 3);
+    const bulbColors = new Float32Array(bulbCount * 3);
+    for (let i = 0; i < bulbCount; i++) {
+      const theta = (i / (bulbCount - 1)) * Math.PI;
+      bulbPositions.set([-Math.cos(theta) * 16, -7 + Math.sin(theta) * 17, -12], i * 3);
+    }
+    const bulbGeometry = new THREE.BufferGeometry();
+    bulbGeometry.setAttribute('position', new THREE.BufferAttribute(bulbPositions, 3));
+    bulbGeometry.setAttribute('color', new THREE.BufferAttribute(bulbColors, 3));
+    track(
+      new THREE.Points(
+        bulbGeometry,
+        new THREE.PointsMaterial({
+          size: small ? 1.3 : 1.1,
+          map: glow,
+          vertexColors: true,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      ),
     );
+    const bulbOn = new THREE.Color('#ffd27a');
+    const bulbOff = new THREE.Color('#5a3a12');
+    const bulbTmp = new THREE.Color();
 
-    const shapes = [];
-    const count = small ? 16 : 32;
-    for (let i = 0; i < count; i++) {
-      const kind = i % 4;
-      const mesh = new THREE.Mesh(geometries[kind], materials[kind]);
-      mesh.position.set(rand(-20, 20), rand(-13, 13), rand(-16, 3));
-      mesh.rotation.set(rand(0, Math.PI), rand(0, Math.PI), 0);
-      mesh.scale.setScalar(rand(0.55, 1.35));
-      mesh.userData = {
-        spin: new THREE.Vector3(rand(-0.8, 0.8), rand(-0.8, 0.8), rand(-0.3, 0.3)),
-        rise: rand(0.25, 0.8),
-        sway: rand(0, Math.PI * 2),
-      };
-      scene.add(mesh);
-      shapes.push(mesh);
+    // Gold sparkles drifting up through the light.
+    const sparkleCount = small ? 70 : 160;
+    const sparklePositions = new Float32Array(sparkleCount * 3);
+    for (let i = 0; i < sparkleCount; i++) {
+      sparklePositions.set(
+        [THREE.MathUtils.randFloat(-22, 22), THREE.MathUtils.randFloat(-7, 15), THREE.MathUtils.randFloat(-14, 4)],
+        i * 3,
+      );
     }
-
-    const starCount = small ? 350 : 800;
-    const starPositions = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-      starPositions.set([rand(-40, 40), rand(-25, 25), rand(-30, 5)], i * 3);
-    }
-    const starGeometry = new THREE.BufferGeometry();
-    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-    const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.07, transparent: true, opacity: 0.75 });
-    const stars = new THREE.Points(starGeometry, starMaterial);
-    scene.add(stars);
+    const sparkleGeometry = new THREE.BufferGeometry();
+    sparkleGeometry.setAttribute('position', new THREE.BufferAttribute(sparklePositions, 3));
+    const sparkleMaterial = new THREE.PointsMaterial({
+      size: 0.35,
+      map: glow,
+      color: '#ffe3a3',
+      transparent: true,
+      opacity: 0.8,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    track(new THREE.Points(sparkleGeometry, sparkleMaterial));
 
     const pointer = { x: 0, y: 0 };
     const onPointerMove = (e) => {
@@ -99,32 +267,50 @@ export default function Background3D({ energy = 0.3 }) {
 
     const clock = new THREE.Clock();
     let speed = energyRef.current;
+    let sweep = 0;
+    let chase = 0;
     let frame = 0;
+    const lookAt = new THREE.Vector3(0, -1.5, 0);
+
     const render = () => {
       frame = requestAnimationFrame(render);
       const dt = Math.min(clock.getDelta(), 0.05);
-      const t = clock.elapsedTime;
       speed += (energyRef.current - speed) * 0.03; // ease between energy levels
-      const motion = reduceMotion ? 0.03 : speed;
+      const motion = reduceMotion ? 0.02 : speed;
 
-      for (const mesh of shapes) {
-        const { spin, rise, sway } = mesh.userData;
-        const k = dt * (0.35 + motion * 2.2);
-        mesh.rotation.x += spin.x * k;
-        mesh.rotation.y += spin.y * k;
-        mesh.rotation.z += spin.z * k;
-        mesh.position.y += rise * dt * (0.25 + motion * 3.5);
-        mesh.position.x += Math.sin(t * 0.4 + sway) * dt * 0.25;
-        if (mesh.position.y > 14) {
-          mesh.position.y = -14;
-          mesh.position.x = rand(-20, 20);
-        }
+      sweep += dt * (0.25 + motion * 1.3);
+      chase += dt * (reduceMotion ? 0 : 3 + motion * 14);
+      sunburst.material.uniforms.uAngle.value += dt * (0.05 + motion * 0.35);
+      floor.material.uniforms.uTime.value += dt * (0.4 + motion * 1.6);
+
+      for (const beam of beams) {
+        const { base, phase, speed: s } = beam.userData;
+        beam.rotation.z = base + Math.sin(sweep * s + phase) * 0.42;
+        beam.material.uniforms.uIntensity.value = 0.26 + motion * 0.22;
       }
-      stars.rotation.z += dt * 0.01 * (1 + motion * 5);
 
-      camera.position.x += (pointer.x * 1.6 - camera.position.x) * 0.03;
-      camera.position.y += (-pointer.y * 1.1 - camera.position.y) * 0.03;
-      camera.lookAt(0, 0, 0);
+      rings.forEach((ring, i) => {
+        ring.material.opacity = 0.15 + 0.25 * (0.5 + 0.5 * Math.sin(sweep * 3 + i * Math.PI));
+      });
+
+      // Every fourth bulb lit, stepping along the arch.
+      for (let i = 0; i < bulbCount; i++) {
+        const lit = ((((i - Math.floor(chase)) % 4) + 4) % 4) === 0;
+        bulbTmp.copy(lit ? bulbOn : bulbOff).toArray(bulbColors, i * 3);
+      }
+      bulbGeometry.attributes.color.needsUpdate = true;
+
+      for (let i = 0; i < sparkleCount; i++) {
+        let y = sparklePositions[i * 3 + 1] + dt * (0.3 + motion * 1.2);
+        if (y > 15) y = -7;
+        sparklePositions[i * 3 + 1] = y;
+      }
+      sparkleGeometry.attributes.position.needsUpdate = true;
+      sparkleMaterial.opacity = 0.55 + 0.25 * Math.sin(sweep * 4);
+
+      camera.position.x += (cameraHome.x + pointer.x * 1.2 - camera.position.x) * 0.03;
+      camera.position.y += (cameraHome.y - pointer.y * 0.6 - camera.position.y) * 0.03;
+      camera.lookAt(lookAt);
       renderer.render(scene, camera);
     };
     render();
@@ -133,10 +319,7 @@ export default function Background3D({ energy = 0.3 }) {
       cancelAnimationFrame(frame);
       resize.disconnect();
       window.removeEventListener('pointermove', onPointerMove);
-      geometries.forEach((g) => g.dispose());
-      materials.forEach((m) => m.dispose());
-      starGeometry.dispose();
-      starMaterial.dispose();
+      disposables.forEach((d) => d.dispose());
       renderer.dispose();
       renderer.domElement.remove();
     };

@@ -200,7 +200,11 @@ function AnswerTiles({ answers, reveal = false }) {
         const s = answerStyle(i);
         const dim = reveal && !a.correct;
         return (
-          <div key={i} className={`host-answer ${dim ? 'dim' : ''}`} style={{ '--answer': s.color }}>
+          <div
+            key={i}
+            className={`host-answer ${dim ? 'dim' : ''} ${reveal && a.correct ? 'correct' : ''}`}
+            style={{ '--answer': s.color }}
+          >
             <Shape shape={s.shape} size={36} />
             <span>{a.text}</span>
             {reveal && a.correct && <span className="tick">✓</span>}

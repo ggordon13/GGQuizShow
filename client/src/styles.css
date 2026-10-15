@@ -212,8 +212,9 @@ textarea {
   font-weight: 800;
   font-size: 1rem;
   cursor: pointer;
+  /* Hover uses `translate`, not `transform`, so it never fights GSAP's transform animations. */
   transition:
-    transform 0.12s ease,
+    translate 0.12s ease,
     background 0.15s ease,
     box-shadow 0.15s ease;
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3);
@@ -221,11 +222,11 @@ textarea {
 }
 
 .btn:hover:not(:disabled) {
-  transform: translateY(-1px);
+  translate: 0 -1px;
 }
 
 .btn:active:not(:disabled) {
-  transform: translateY(2px);
+  translate: 0 2px;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
 }
 
@@ -1256,7 +1257,7 @@ select,
   font-size: clamp(1rem, 2.2vw, 1.5rem);
   box-shadow: 0 5px 0 rgba(0, 0, 0, 0.3);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-  transition: opacity 0.3s;
+  /* No CSS opacity transition here: GSAP animates these tiles' opacity. */
   overflow-wrap: anywhere;
 }
 
@@ -1264,8 +1265,19 @@ select,
   flex: none;
 }
 
+/* Wrong answers stay readable (people want to see what they picked) but step back. */
 .host-answer.dim {
-  opacity: 0.3;
+  background: color-mix(in srgb, var(--answer) 30%, #1a0b3d);
+  color: rgba(255, 255, 255, 0.82);
+  box-shadow: none;
+}
+
+.host-answer.correct {
+  outline: 4px solid #fff;
+  outline-offset: 3px;
+  box-shadow:
+    0 5px 0 rgba(0, 0, 0, 0.3),
+    0 0 28px rgba(255, 255, 255, 0.35);
 }
 
 .host-answer .tick {
